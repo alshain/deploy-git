@@ -9,11 +9,14 @@ h = lambda i = 0: w(False) and False
 c = lambda i = 0: w(True) or True
 sp = lambda str: map(s, str.split(':'))
 d = dict
-en = enumerate
-#h = lambda: _status = True
+enu = enumerate
+is_path = lambda _p: s(_p) and e(_p) and c()
+is_pair = lambda _p: s(_p) and q() and ((not e(_p)) or h())
+paths = lambda yml: [(i, pth) for i, pth in enu(yml) if is_path(pth)]
+pairs = lambda _y, _i: [(sp(ln)[0], sp(ln)[1]) for ln in _y[_i + 1:] if is_pair(ln)]
+parse_config = lambda lines:d([(pth, d(pairs(lines, i))) for i, pth in paths(lines)])
+
 with open('meta.yml', 'r') as f:
     yml = map(s, f.readlines())
-    config = d([(pth, d([(sp(ln)[0], sp(ln)[1]) for ln in yml[i + 1:] if s(ln) and q() and ((not e(ln)) or h())])) for i, pth in en(yml) if s(pth) and e(pth, ':') and c()])
-
-
-
+    config = parse_config(yml)
+    print config
