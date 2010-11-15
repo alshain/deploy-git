@@ -1,22 +1,23 @@
 #!/usr/bin/env python
 
-import os, sys, subprocess, threading, shutil, glob
-
-_l = [True]
-w = lambda v, f = _l.__setitem__: f(0, v) #write
-s = lambda str: str.strip() #strip
-e = lambda str, suffix = ':': str.endswith(suffix) #endswith
-q = lambda: _l[0] #query status
-h = lambda i = 0: w(False) and False #Halt
-c = lambda i = 0: w(True) or True #Continue
-sp = lambda str: map(s, str.split(':')) #Split
-d = dict
-enu = enumerate
-is_path = lambda _p: s(_p) and e(_p) and c()
-is_pair = lambda _p: s(_p) and q() and ((not e(_p)) or h())
-paths = lambda yml: [(i, pth) for i, pth in enu(yml)]
-pairs = lambda _y, _i: [(sp(ln)[0], sp(ln)[1]) for ln in _y[_i + 1:] if is_pair(ln)]
-parse_config = lambda lines: d([(pth[:-1], d(pairs(lines, i))) for i, pth in paths(lines) if is_path(pth)])
+import os, sys, subprocess, shutil, glob
+def parse_config(lines):
+    _l = [True]
+    w = lambda v, f = _l.__setitem__: f(0, v) #write
+    s = lambda str: str.strip() #strip
+    e = lambda str, suffix = ':': str.endswith(suffix) #endswith
+    q = lambda: _l[0] #query status
+    h = lambda i = 0: w(False) and False #Halt
+    c = lambda i = 0: w(True) or True #Continue
+    sp = lambda str: map(s, str.split(':')) #Split
+    d = dict
+    enu = enumerate
+    is_path = lambda _p: s(_p) and e(_p) and c()
+    is_pair = lambda _p: s(_p) and q() and ((not e(_p)) or h())
+    paths = lambda yml: [(i, pth) for i, pth in enu(yml)]
+    pairs = lambda _y, _i: [(sp(ln)[0], sp(ln)[1]) for ln in _y[_i + 1:] if is_pair(ln)]
+    lines = map(s, lines)
+    return d([(pth[:-1], d(pairs(lines, i))) for i, pth in paths(lines) if is_path(pth)])
 
 cwd = sys.path[0]
 mycenter = lambda str: str.center(30, '-').center(40, '#')
@@ -31,18 +32,8 @@ def confirm(str):
         elif answer == "No":
             raise RuntimeError("Aborting.")
 
-class Worker(threading.Thread):
-    def __init__(self, callback, args = None, kwargs = None):
-        super(self.__class__, self).__init__()
-        self._args = args or []
-        self._kwargs = kwargs or {}
-        self._callback = callback
-
-
     def run(self):
         self._callback(*self._args, **self._kwargs)
-
-process = lambda * args, **kwargs: Worker(subprocess.Popen, args, kwargs)
 
 class Dependency(object):
     def __init__(self, args):
@@ -61,7 +52,8 @@ class Dependency(object):
 
     def __call__(self):
         if not os.path.isdir(self._path): raise RuntimeError("Directory magically disappeared!")
-        self._checkGitPresence()
+        if self._gitIsPresent()[0]:
+            self._subprocessBuilder(['git', 'init'])()
 
     def pull(self):
         pass
@@ -71,31 +63,33 @@ class Dependency(object):
         pass
 
     def _subprocessBuilder(self, command):
-        return lambda: self._executeWorker(process(command, cwd = self._path))
+        return lambda: self._executeSubprocess(
+            subprocess.Popen(command, cwd = self._path, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+        )
 
-    def _checkGitPresence(self):
+    def _gitIsPresent(self):
         return self._subprocessBuilder(['git', 'status'])()
-
-
 
     def install(self):
         install = self._subprocessBuilder(['git', 'init'])
         install()
 
-
-
-    def _executeWorker(self, worker):
-        try:
-            worker.start()
-        finally:
-            worker.join()
+    def _executeSubprocess(self, process):
+        out, err = process.communicate()
+        print mycenter('Output')
+        print out or ">>None<<"
+        print mycenter('Error')
+        print err or ">>None<<"
+        print mycenter('Return code')
+        print process.returncode or ">>Success!<<"
+        print dir(process)
+        return (process.returncode, out, err)
 
 def run():
     print mycenter("Running gploy v0.1")
     with open('meta.yml', 'r') as f:
         #Strip whitespace
-        yml = map(s, f.readlines())
-        config = parse_config(yml)
+        config = parse_config(f.readlines())
         call = lambda x: x()
         deps = map(Dependency, config.iteritems())
         map(call, deps)
