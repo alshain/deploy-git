@@ -145,4 +145,3 @@ if __name__ == "__main__":
     print mycenter("gploy setup completed")
     print "let's give this a shot now... shall we?"
     run()
-
