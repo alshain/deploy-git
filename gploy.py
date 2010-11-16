@@ -14,6 +14,7 @@ def parse_config(lines):
                 key = splitted[0].strip()
                 value = ":".join(splitted[1:]).strip()
                 section[key] = value
+    return sections
 
 cwd = sys.path[0]
 mycenter = lambda str: str.center(30, '-').center(40, '#')
@@ -98,16 +99,21 @@ def run():
         deps = map(Dependency, config.iteritems())
         map(call, deps)
 
-if __name__ == "__main__":
-    new_path = lambda * args: os.path.join('_gploy', *args)
-    print mycenter("Welcome to gploy!")
+def check_git_version():
     print "Checking git version..."
-    version = subprocess.check_output(['git', '--version'])
+    cmd = ['git', '--version']
+    p = subprocess.PIPE
+    version = subprocess.Popen(cmd, stdout = p, stderr = p).communicate()[0]
     version = version[len("git version "):]
     print "Detected: %s" % version
     if not version.startswith("1.7"):
         print "Incompatible GIT version! Expected >= 1.7"
         exit(1)
+
+if __name__ == "__main__":
+    new_path = lambda * args: os.path.join('_gploy', *args)
+    print mycenter("Welcome to gploy!")
+    check_git_version()
     if os.path.isfile('../meta.yml'):
         raise RuntimeError("You probably do not want to do this: meta.yml detected in parent directory.")
 
