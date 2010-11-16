@@ -2,22 +2,18 @@
 
 import os, sys, subprocess, shutil, glob
 def parse_config(lines):
-    _l = [True]
-    w = lambda v, f = _l.__setitem__: f(0, v) #write
-    s = lambda str: str.strip() #strip
-    e = lambda str, suffix = ':': str.endswith(suffix) #endswith
-    q = lambda: _l[0] #query status
-    h = lambda i = 0: w(False) and False #Halt
-    c = lambda i = 0: w(True) or True #Continue
-    sp = lambda str: map(s, str.split(':')) #Split
-    d = dict
-    enu = enumerate
-    is_path = lambda _p: s(_p) and e(_p) and c()
-    is_pair = lambda _p: s(_p) and q() and ((not e(_p)) or h())
-    paths = lambda yml: [(i, pth) for i, pth in enu(yml)]
-    pairs = lambda _y, _i: [(sp(ln)[0], sp(ln)[1]) for ln in _y[_i + 1:] if is_pair(ln)]
-    lines = map(s, lines)
-    return d([(pth[:-1], d(pairs(lines, i))) for i, pth in paths(lines) if is_path(pth)])
+    strip = lambda str: str.strip()
+    lines = map(strip, lines)
+    sections = {}
+    for line in lines:
+        if line.endswith(":"):
+            sections[line[:-1]] = section = {}
+        elif sections:
+            splitted = line.split(':')
+            if len(splitted) > 1:
+                key = splitted[0].strip()
+                value = ":".join(splitted[1:]).strip()
+                section[key] = value
 
 cwd = sys.path[0]
 mycenter = lambda str: str.center(30, '-').center(40, '#')
@@ -43,6 +39,11 @@ class Dependency(object):
         if not os.path.isdir(self._path):
             print "Creating directory"
             os.makedirs(self._path)
+        self._git = lambda * args: self._subprocessBuilder(['git'] + list(args))()
+        self._overlay = self._config.get('overlay', None)
+        self._overlayBranch = self._config.get('overlay_branch', None)
+        self._subdirectory = self._config.get('overlay', None)
+        self._overlay = self._config.get('overlay', None)
 
         map(self._requestConfigItem, ('url', 'branch'))
 
@@ -52,8 +53,8 @@ class Dependency(object):
 
     def __call__(self):
         if not os.path.isdir(self._path): raise RuntimeError("Directory magically disappeared!")
-        if self._gitIsPresent()[0]:
-            self._subprocessBuilder(['git', 'init'])()
+        if not self._gitIsPresent():
+            self._install()
 
     def pull(self):
         pass
@@ -63,26 +64,29 @@ class Dependency(object):
         pass
 
     def _subprocessBuilder(self, command):
+        print ">>> " + " ".join(command)
         return lambda: self._executeSubprocess(
             subprocess.Popen(command, cwd = self._path, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
         )
 
     def _gitIsPresent(self):
-        return self._subprocessBuilder(['git', 'status'])()
+        return not self._subprocessBuilder(['git', 'status'])()[0]
 
-    def install(self):
-        install = self._subprocessBuilder(['git', 'init'])
-        install()
+    def _install(self):
+        self._git('init')
+        self._git('remote', 'add', 'origin', self._url)
+        self._git('fetch', 'origin')
+        self._git('checkout', 'origin/%s' % self._branch, '-b', self._branch)
 
     def _executeSubprocess(self, process):
         out, err = process.communicate()
-        print mycenter('Output')
-        print out or ">>None<<"
-        print mycenter('Error')
-        print err or ">>None<<"
-        print mycenter('Return code')
-        print process.returncode or ">>Success!<<"
-        print dir(process)
+        if out:
+            print mycenter('Output')
+            print out
+        if err:
+            print mycenter('Error')
+            print err
+        print ">> ", process.returncode or ">>Success!<<", "\n"
         return (process.returncode, out, err)
 
 def run():
@@ -96,6 +100,14 @@ def run():
 
 if __name__ == "__main__":
     new_path = lambda * args: os.path.join('_gploy', *args)
+    print mycenter("Welcome to gploy!")
+    print "Checking git version..."
+    version = subprocess.check_output(['git', '--version'])
+    version = version[len("git version "):]
+    print "Detected: %s" % version
+    if not version.startswith("1.7"):
+        print "Incompatible GIT version! Expected >= 1.7"
+        exit(1)
     if os.path.isfile('../meta.yml'):
         raise RuntimeError("You probably do not want to do this: meta.yml detected in parent directory.")
 
