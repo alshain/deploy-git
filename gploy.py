@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import os, sys, subprocess, shutil, glob
+import os, sys, functools, subprocess, shutil, glob, types
 def parse_config(lines):
     strip = lambda str: str.strip()
     lines = map(strip, lines)
@@ -32,19 +32,236 @@ def confirm(str):
     def run(self):
         self._callback(*self._args, **self._kwargs)
 
+
+def namespace(cls):
+    return cls()
+
+def singleton(cls, instances = {}):
+    def factory():
+        instances.setdefault(cls, cls())
+        return instances[cls]
+    return factory
+
+#===========================================================================
+# Functional
+#===========================================================================
+
+@namespace
+class functional(object):
+    def map_ind(self, funcs, iterable, fallback = None):
+        """
+        Map function to item individually.
+        
+        The fallback parameter is used, when an item has
+        no corresponding function.
+        
+        """
+        result = []
+        for i, value in enumerate(iterable):
+            f = None
+            f = funcs[i] if i < len(funcs) else fallback
+            if callable(f):
+                value = f(value)
+            result.append(value)
+        return result
+
+    def partial(self, func, *args, **kwargs):
+        prt = functools.partial
+        partial_ = prt(func, *args, **kwargs)
+        partial_.partial = prt(self.partial, partial_)
+        return partial_
+
+    def hook_args(self, func, hooks, fallback = None):
+        """Apply specific hooks to positional arguments."""
+        @functools.wraps(func)
+        def hooked(*args, **kwargs):
+            args = self.map_ind(hooks, args, fallback)
+            return func(*args, **kwargs)
+        return hooked
+
+    def hooks_kwargs(self, wrapped, hooks, fallback = None):
+        """Apply specific hooks to named arguments."""
+        # Gather variable names
+        if isinstance(wrapped, types.MethodType):
+            # We don't want the self parameter really...
+            var_names = wrapped.im_func.func_code.co_varnames
+        else:
+            var_names = wrapped.func_code.co_varnames
+
+        # Build lookup table key -> func
+        # Transform func -> (key1, key2) into key1 -> func, key2 -> func
+        key_func = dict()
+        for key, value in hooks.iteritems():
+            if isinstance(key, str):
+                if not callable(value):
+                    raise ValueError("Uncallable object provided: %s" % value)
+                if key in key_func:
+                        raise ValueError("Duplicate key: %s" % key)
+                key_func[key] = value
+            elif callable(key):
+                func, keys = (key, value)
+                for key in keys:
+                    if key in key_func:
+                        raise ValueError("Duplicate key: %s" % key)
+                    key_func[key] = func
+            else:
+                raise ValueError("Uncallable object provided: %s" % value)
+
+        # Build args hook
+        hooks = []
+        for key in var_names:
+            hooks.append(key_func[key] if key in key_func else None)
+        def hooked(*args, **kwargs):
+            args = self.map_ind(hooks, args)
+            processed = kwargs.copy()
+            for key, func in key_func.iteritems():
+                if key in processed:
+                    processed[key] = func(processed[key])
+            return wrapped(*args, **processed)
+        return hooked
+
+    def process(self, fn, processor):
+        """Process args by a function."""
+        @functools.wraps(fn)
+        def processed(*args, **kwargs):
+            args = processor(args)
+            return fn(*args, **kwargs)
+        return processed
+
+    def joinParam(self, fn, part, append_part = False):
+        @functools.wraps(fn)
+        def join(*args, **kwargs):
+            if append_part:
+                return fn(args[0] + part, *args[1:], **kwargs)
+            else:
+                return fn(part + args[0], *args[1:], **kwargs)
+
+    def chain(self, outer, inner, *args):
+        """
+        Chain functions
+        
+        The order in which the functions, in which
+        they are passed to the functions, matches
+        the way you write them down, if you chain
+        them directly.
+        
+        If you were to do:
+            lambda *args, **kwargs: a(b(c(*args, **kwargs)))
+        You would call:
+            chained(a, b, c)
+        
+        """
+        functions = list(args)
+        functions.reverse()
+        functions.extend([inner, outer])
+        def chained(*args, **kwargs):
+            # Call first functions with original arguments
+            result = functions[0](*args, **kwargs)
+            for func in functions[1:]:
+                result = func(result)
+            return result
+        return chained
+
+    def iterate(self, func, times = 2):
+        """Iterate a functions over it's own result."""
+        def iterated(arg):
+            result = arg
+            for i in range(0, times):
+                result = func(result)
+            return result
+        return iterated
+
+#===============================================================================
+# venv helper
+#===============================================================================
+
+@namespace
+class venv(object):
+    def __init__(self):
+        self._mappings = {}
+
+    def map(self, virtual, actual):
+        self._mappings[virtual] = actual
+
+    def getCode(self):
+        for virtual, actual in self._mappings.iteritems():
+            #virtual = str.strip(virtual)
+            #actual = str.strip(actual)
+            yield "venv.map(%r, %r)" % (virtual, actual)
+
+
+#===========================================================================
+# ProcessFactory
+#===========================================================================
+
+@namespace
+class process_factory(object):
+    class Process(object):
+        class StreamWrapper(object):
+            def __init__(self, stream):
+                self._stream = stream
+                self._buffer = []
+            def _print(self, msg):
+                print repr(self), msg
+            def __getattr__(self, name):
+                if not name in ['fileno']:
+                    self._print("# Redirecting: %s" % name)
+                return getattr(self._stream, name)
+            def write(self, data):
+                print "###########"
+                self._buffer.append(data)
+                self._stream.write(data)
+                self._stream.flush()
+            def getBuffer(self):
+                return self._buffer[:]
+        def __init__(self, *args, **kwargs):
+            print "#" * 79
+            print ">> Running `%s`" % " ".join(args[0])
+            self._stdout = self.StreamWrapper(sys.stdout)
+            self._stderr = self.StreamWrapper(sys.stderr)
+            kwargs.setdefault('stdout', self._stdout)
+            kwargs.setdefault('stderr', self._stderr)
+            self._process = subprocess.Popen(*args, **kwargs)
+            self._process.communicate()
+
+    def __init__(self):
+        # We are the Borg, resistance is futile!
+        # self.__dict__ = self.__shared_state
+        pass
+
+    def build(self, command, *args, **kwargs):
+        return self.Process(command, *args, **kwargs)
+
+    def partial(self, *args, **kwargs):
+        """Create builder with predefined arguments"""
+        return functional.partial(self.build, *args, **kwargs)
+
+    def partialCommand(self, command, *args, **kwargs):
+        """Return builder default arguments and partial command."""
+        def wrapper(command_ammendment, **kwargs):
+            merged = command + command_ammendment
+            return self.build(merged, **kwargs)
+        packer = lambda args: [list(args)]
+        wrapper = functional.process(wrapper, packer)
+        return functional.partial(wrapper, *args, **kwargs)
+
 class Dependency(object):
+    master = None
     def __init__(self, args):
-        self._path, self._config = args
-        print mycenter(self._path)
-        self._path = os.path.normpath(os.path.join(cwd, self._path))
+        self._subdirectory, self._config = args
+        self._virtual = self._subdirectory
+        print mycenter(self._subdirectory)
+        self._path = os.path.normpath(os.path.join(cwd, self._subdirectory))
         if not os.path.isdir(self._path):
             print "Creating directory"
             os.makedirs(self._path)
-        self._git = lambda * args: self._subprocessBuilder(['git'] + list(args))()
+        self._git = process_factory.partialCommand(["git"], cwd = self._path)
         self._overlay = self._config.get('overlay', None)
         self._overlayBranch = self._config.get('overlay_branch', None)
-        self._subdirectory = self._config.get('overlay', None)
+
         self._overlay = self._config.get('overlay', None)
+        self._alias = self._config.get('alias', None)
+        self._master = self._config.get('master', None)
 
         map(self._requestConfigItem, ('url', 'branch'))
 
@@ -55,7 +272,22 @@ class Dependency(object):
     def __call__(self):
         if not os.path.isdir(self._path): raise RuntimeError("Directory magically disappeared!")
         if not self._gitIsPresent():
-            self._install()
+            pass
+            #self._install()
+
+        if self._alias:
+            try:
+                virtual, actual = map(str.strip, self._alias.split(":"))
+                self._virtual = virtual
+                venv.map(virtual, os.path.join(self._path, actual))
+            except:
+                "Could not parse map: %s" % self._alias
+                raise
+        if self._master:
+            if self.__class__.master:
+                raise RuntimeError("There can be only one (master).")
+            else:
+                self.__class__.master = self._virtual
 
     def pull(self):
         pass
@@ -71,7 +303,7 @@ class Dependency(object):
         )
 
     def _gitIsPresent(self):
-        return not self._subprocessBuilder(['git', 'status'])()[0]
+        print self._git('status')
 
     def _install(self):
         self._git('init')
@@ -95,9 +327,24 @@ def run():
     with open('meta.yml', 'r') as f:
         #Strip whitespace
         config = parse_config(f.readlines())
-        call = lambda x: x()
-        deps = map(Dependency, config.iteritems())
-        map(call, deps)
+
+    call = lambda x: x()
+    deps = map(Dependency, config.iteritems())
+    map(call, deps)
+    if Dependency.master:
+        with open('run.py', 'w') as f:
+            w = lambda str: f.write(str + '\n')
+            w("#!/usr/bin/env python")
+            w("from _gploy import venv")
+            w("")
+            w("# Setting up virtual environment")
+            w("venv.set_source_dir(%r)" % cwd)
+            for line in venv.getCode():
+                w(line)
+            w("")
+            w("# Starting application")
+            w("import %s" % Dependency.master)
+            w("%s._gploy()" % Dependency.master)
 
 def check_git_version():
     print "Checking git version..."
