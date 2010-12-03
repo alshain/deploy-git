@@ -368,6 +368,7 @@ if __name__ == "__main__":
         'gploy.py',
         '.git',
         '.gitignore',
+        'venv.py',
     )
     if not os.path.isdir(new_path()):
         print "Creating direcotry: _gploy"
