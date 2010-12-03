@@ -338,7 +338,6 @@ def run():
             w("from _gploy import venv")
             w("")
             w("# Setting up virtual environment")
-            w("venv.set_source_dir(%r)" % cwd)
             for line in venv.getCode():
                 w(line)
             w("")

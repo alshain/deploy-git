@@ -114,6 +114,11 @@ class vEnv(object):
 
 # Initialize vEnv instance
 vEnv = vEnv()
+try:
+    main_file = sys.modules["__main__"].__file__
+    vEnv.setSourceDir(os.path.dirname(main_file))
+except:
+    pass
 
 def map(virtual, actual):
     """Redirect import."""
